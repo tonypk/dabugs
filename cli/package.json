@@ -1,0 +1,24 @@
+{
+  "name": "dabugs",
+  "version": "0.1.0",
+  "description": "AI-powered bug feedback loop — users report, AI fixes",
+  "type": "module",
+  "bin": {
+    "dabugs": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  },
+  "keywords": ["telegram", "bug-tracking", "ai", "claude-code", "cloudflare-workers"],
+  "license": "MIT"
+}
