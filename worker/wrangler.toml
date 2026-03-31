@@ -1,0 +1,20 @@
+name = "dabugs"
+main = "src/index.ts"
+compatibility_date = "2025-03-28"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dabugs-db"
+database_id = "placeholder-replace-after-d1-create"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+# Secrets (set via `wrangler secret put`):
+# DABUGS_API_KEY
+# BOT_TOKEN
+# TELEGRAM_ADMIN_CHAT_ID
+# GOOGLE_SERVICE_ACCOUNT_KEY
+# GOOGLE_SHEET_ID
+# TELEGRAM_WEBHOOK_SECRET
