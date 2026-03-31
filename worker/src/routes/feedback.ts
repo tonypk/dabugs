@@ -5,7 +5,12 @@ import {
   insertFeedback,
   updateFeedbackDiagnosis,
   updateFeedbackStatus,
+  listProjects,
 } from "../db/queries";
+import {
+  sendDiagnosisNotification,
+  sendFixedNotification,
+} from "../services/telegram";
 
 export const feedback = new Hono<{ Bindings: Env }>();
 
@@ -73,6 +78,17 @@ feedback.patch("/feedback/:id/diagnose", async (c) => {
       fix_plan: body.fix_plan,
     });
 
+    // Send Telegram notification (non-blocking)
+    try {
+      const projects = await listProjects(c.env.DB);
+      const project = projects.find((p) => p.id === updated.project_id);
+      if (project) {
+        await sendDiagnosisNotification(c.env, updated, project.name);
+      }
+    } catch (notificationError) {
+      console.error("Failed to send diagnosis notification:", notificationError);
+    }
+
     return c.json(updated);
   } catch (error) {
     if (error instanceof Error && error.message.includes("not found")) {
@@ -99,6 +115,19 @@ feedback.patch("/feedback/:id/status", async (c) => {
       status: body.status,
       pr_url: body.pr_url,
     });
+
+    // Send Telegram notification if status is fixed with PR URL (non-blocking)
+    if (body.status === "fixed" && body.pr_url) {
+      try {
+        const projects = await listProjects(c.env.DB);
+        const project = projects.find((p) => p.id === updated.project_id);
+        if (project) {
+          await sendFixedNotification(c.env, updated, project.name);
+        }
+      } catch (notificationError) {
+        console.error("Failed to send fixed notification:", notificationError);
+      }
+    }
 
     return c.json(updated);
   } catch (error) {
