@@ -11,8 +11,12 @@ database_id = "placeholder-replace-after-d1-create"
 [triggers]
 crons = ["*/5 * * * *"]
 
+# Test environment variables (for vitest)
+[vars]
+DABUGS_API_KEY = "test-api-key-local-only"
+
 # Secrets (set via `wrangler secret put`):
-# DABUGS_API_KEY
+# DABUGS_API_KEY (production)
 # BOT_TOKEN
 # TELEGRAM_ADMIN_CHAT_ID
 # GOOGLE_SERVICE_ACCOUNT_KEY
