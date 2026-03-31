@@ -1,13 +1,13 @@
 import { Bot, InlineKeyboard, webhookCallback } from "grammy";
 import type { Env, FeedbackRow } from "../types";
-import { insertFeedback, listProjects, updateFeedbackStatus, getFeedbackById } from "../db/queries";
-
-interface UserSession {
-  selectedProjectId?: string;
-  awaitingDescription?: boolean;
-}
-
-const sessions = new Map<number, UserSession>();
+import {
+  insertFeedback,
+  listProjects,
+  updateFeedbackStatus,
+  getTelegramSession,
+  setTelegramSession,
+  deleteTelegramSession,
+} from "../db/queries";
 
 export function createBot(env: Env): Bot {
   const bot = new Bot(env.BOT_TOKEN);
@@ -15,11 +15,11 @@ export function createBot(env: Env): Bot {
   // /start command
   bot.command("start", async (ctx) => {
     await ctx.reply(
-      "欢迎使用 DaBugs Bot! 🐛\n\n" +
-      "可用命令:\n" +
-      "/bug - 报告新 bug\n" +
-      "/start - 显示此消息\n\n" +
-      "你也可以直接发送文字或图片来报告 bug。"
+      "Welcome to DaBugs Bot!\n\n" +
+      "Commands:\n" +
+      "/bug - Report a new bug\n" +
+      "/start - Show this message\n\n" +
+      "You can also send text or photos directly to report a bug."
     );
   });
 
@@ -28,27 +28,25 @@ export function createBot(env: Env): Bot {
     const projects = await listProjects(env.DB);
 
     if (projects.length === 0) {
-      await ctx.reply("没有可用的项目。请先添加项目。");
+      await ctx.reply("No projects available. Please add a project first.");
       return;
     }
 
     if (projects.length === 1) {
-      // Auto-select single project
       const userId = ctx.from?.id;
       if (userId) {
-        sessions.set(userId, { selectedProjectId: projects[0].id, awaitingDescription: true });
+        await setTelegramSession(env.DB, userId, projects[0].id);
       }
-      await ctx.reply(`已选择项目: ${projects[0].name}\n\n请描述 bug 或发送截图:`);
+      await ctx.reply(`Selected project: ${projects[0].name}\n\nDescribe the bug or send a screenshot:`);
       return;
     }
 
-    // Multiple projects - show inline keyboard
     const keyboard = new InlineKeyboard();
     for (const project of projects) {
       keyboard.text(project.name, `select_project:${project.id}`).row();
     }
 
-    await ctx.reply("请选择一个项目:", { reply_markup: keyboard });
+    await ctx.reply("Select a project:", { reply_markup: keyboard });
   });
 
   // Callback query for project selection
@@ -56,14 +54,14 @@ export function createBot(env: Env): Bot {
     const projectId = ctx.match[1];
     const userId = ctx.from.id;
 
-    sessions.set(userId, { selectedProjectId: projectId, awaitingDescription: true });
+    await setTelegramSession(env.DB, userId, projectId);
 
     const projects = await listProjects(env.DB);
     const project = projects.find((p) => p.id === projectId);
     const projectName = project?.name ?? projectId;
 
     await ctx.answerCallbackQuery();
-    await ctx.editMessageText(`已选择项目: ${projectName}\n\n请描述 bug 或发送截图:`);
+    await ctx.editMessageText(`Selected project: ${projectName}\n\nDescribe the bug or send a screenshot:`);
   });
 
   // Callback query for confirm diagnosis
@@ -72,11 +70,11 @@ export function createBot(env: Env): Bot {
 
     try {
       await updateFeedbackStatus(env.DB, feedbackId, { status: "confirmed" });
-      await ctx.answerCallbackQuery("已确认诊断");
-      await ctx.editMessageReplyMarkup(); // Remove buttons
-      await ctx.reply(`Bug #${feedbackId} 已确认，将开始修复。`);
+      await ctx.answerCallbackQuery("Diagnosis confirmed");
+      await ctx.editMessageReplyMarkup();
+      await ctx.reply(`Bug #${feedbackId} confirmed. Fix will begin shortly.`);
     } catch (error) {
-      await ctx.answerCallbackQuery("更新状态失败");
+      await ctx.answerCallbackQuery("Failed to update status");
       console.error("Failed to confirm feedback:", error);
     }
   });
@@ -87,11 +85,11 @@ export function createBot(env: Env): Bot {
 
     try {
       await updateFeedbackStatus(env.DB, feedbackId, { status: "rejected" });
-      await ctx.answerCallbackQuery("已拒绝诊断");
-      await ctx.editMessageReplyMarkup(); // Remove buttons
-      await ctx.reply(`Bug #${feedbackId} 已拒绝，诊断需要修改。`);
+      await ctx.answerCallbackQuery("Diagnosis rejected");
+      await ctx.editMessageReplyMarkup();
+      await ctx.reply(`Bug #${feedbackId} rejected.`);
     } catch (error) {
-      await ctx.answerCallbackQuery("更新状态失败");
+      await ctx.answerCallbackQuery("Failed to update status");
       console.error("Failed to reject feedback:", error);
     }
   });
@@ -99,16 +97,14 @@ export function createBot(env: Env): Bot {
   // Handle text messages
   bot.on("message:text", async (ctx) => {
     const userId = ctx.from.id;
-    const session = sessions.get(userId);
     const description = ctx.message.text;
 
-    // Ignore commands
     if (description.startsWith("/")) return;
 
     const projects = await listProjects(env.DB);
 
     if (projects.length === 0) {
-      await ctx.reply("没有可用的项目。请先添加项目。");
+      await ctx.reply("No projects available. Please add a project first.");
       return;
     }
 
@@ -116,21 +112,19 @@ export function createBot(env: Env): Bot {
     let projectName: string;
 
     if (projects.length === 1) {
-      // Auto-select single project
       projectId = projects[0].id;
       projectName = projects[0].name;
-    } else if (session?.selectedProjectId && session.awaitingDescription) {
-      // Use selected project
-      projectId = session.selectedProjectId;
-      const project = projects.find((p) => p.id === projectId);
-      projectName = project?.name ?? projectId;
-
-      // Clear session
-      sessions.delete(userId);
     } else {
-      // Multiple projects but no selection
-      await ctx.reply("请先使用 /bug 选择项目");
-      return;
+      const sessionProjectId = await getTelegramSession(env.DB, userId);
+      if (sessionProjectId) {
+        projectId = sessionProjectId;
+        const project = projects.find((p) => p.id === projectId);
+        projectName = project?.name ?? projectId;
+        await deleteTelegramSession(env.DB, userId);
+      } else {
+        await ctx.reply("Please use /bug to select a project first.");
+        return;
+      }
     }
 
     try {
@@ -142,12 +136,10 @@ export function createBot(env: Env): Bot {
         reporter_name: ctx.from.username ?? ctx.from.first_name ?? "Unknown",
       });
 
-      await ctx.reply(`Bug 已记录! ID: #${feedback.id}\n项目: ${projectName}`);
-
-      // Notify admin
+      await ctx.reply(`Bug recorded! ID: #${feedback.id}\nProject: ${projectName}`);
       await notifyAdmin(env, feedback, projectName);
     } catch (error) {
-      await ctx.reply("记录 bug 失败，请稍后重试");
+      await ctx.reply("Failed to record bug. Please try again later.");
       console.error("Failed to insert feedback:", error);
     }
   });
@@ -155,15 +147,14 @@ export function createBot(env: Env): Bot {
   // Handle photo messages
   bot.on("message:photo", async (ctx) => {
     const userId = ctx.from.id;
-    const session = sessions.get(userId);
     const description = ctx.message.caption ?? "screenshot";
-    const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Get largest photo
+    const photo = ctx.message.photo[ctx.message.photo.length - 1];
     const fileId = photo.file_id;
 
     const projects = await listProjects(env.DB);
 
     if (projects.length === 0) {
-      await ctx.reply("没有可用的项目。请先添加项目。");
+      await ctx.reply("No projects available. Please add a project first.");
       return;
     }
 
@@ -171,21 +162,19 @@ export function createBot(env: Env): Bot {
     let projectName: string;
 
     if (projects.length === 1) {
-      // Auto-select single project
       projectId = projects[0].id;
       projectName = projects[0].name;
-    } else if (session?.selectedProjectId && session.awaitingDescription) {
-      // Use selected project
-      projectId = session.selectedProjectId;
-      const project = projects.find((p) => p.id === projectId);
-      projectName = project?.name ?? projectId;
-
-      // Clear session
-      sessions.delete(userId);
     } else {
-      // Multiple projects but no selection
-      await ctx.reply("请先使用 /bug 选择项目");
-      return;
+      const sessionProjectId = await getTelegramSession(env.DB, userId);
+      if (sessionProjectId) {
+        projectId = sessionProjectId;
+        const project = projects.find((p) => p.id === projectId);
+        projectName = project?.name ?? projectId;
+        await deleteTelegramSession(env.DB, userId);
+      } else {
+        await ctx.reply("Please use /bug to select a project first.");
+        return;
+      }
     }
 
     try {
@@ -195,15 +184,13 @@ export function createBot(env: Env): Bot {
         description,
         reporter_id: userId.toString(),
         reporter_name: ctx.from.username ?? ctx.from.first_name ?? "Unknown",
-        screenshot_urls: [fileId], // Store Telegram file_id
+        screenshot_urls: [fileId],
       });
 
-      await ctx.reply(`Bug 已记录! ID: #${feedback.id}\n项目: ${projectName}`);
-
-      // Notify admin
+      await ctx.reply(`Bug recorded! ID: #${feedback.id}\nProject: ${projectName}`);
       await notifyAdmin(env, feedback, projectName);
     } catch (error) {
-      await ctx.reply("记录 bug 失败，请稍后重试");
+      await ctx.reply("Failed to record bug. Please try again later.");
       console.error("Failed to insert feedback:", error);
     }
   });
@@ -212,16 +199,18 @@ export function createBot(env: Env): Bot {
 }
 
 export async function notifyAdmin(env: Env, feedback: FeedbackRow, projectName: string): Promise<void> {
+  if (!env.TELEGRAM_ADMIN_CHAT_ID) return;
+
   const bot = new Bot(env.BOT_TOKEN);
 
   const screenshots = feedback.screenshot_urls ? JSON.parse(feedback.screenshot_urls) : [];
-  const screenshotInfo = screenshots.length > 0 ? `\n📷 截图: ${screenshots.length} 张` : "";
+  const screenshotInfo = screenshots.length > 0 ? `\nScreenshots: ${screenshots.length}` : "";
 
   const message =
-    `🐛 新 Bug 报告 #${feedback.id}\n\n` +
-    `项目: ${projectName}\n` +
-    `描述: ${feedback.description}\n` +
-    `报告人: ${feedback.reporter_name} (${feedback.reporter_id})` +
+    `New Bug Report #${feedback.id}\n\n` +
+    `Project: ${projectName}\n` +
+    `Description: ${feedback.description}\n` +
+    `Reporter: ${feedback.reporter_name} (${feedback.reporter_id})` +
     screenshotInfo;
 
   await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, message);
@@ -232,18 +221,19 @@ export async function sendDiagnosisNotification(
   feedback: FeedbackRow,
   projectName: string
 ): Promise<void> {
+  if (!env.TELEGRAM_ADMIN_CHAT_ID) return;
+
   const bot = new Bot(env.BOT_TOKEN);
 
   const message =
-    `🔍 Bug 诊断完成 #${feedback.id}\n\n` +
-    `项目: ${projectName}\n` +
-    `描述: ${feedback.description}\n\n` +
-    `诊断:\n${feedback.diagnosis}\n\n` +
-    `修复计划:\n${feedback.fix_plan}`;
+    `Bug #${feedback.id} Diagnosis [${projectName}]\n\n` +
+    `Description: ${feedback.description}\n\n` +
+    `Diagnosis:\n${feedback.diagnosis}\n\n` +
+    `Fix Plan:\n${feedback.fix_plan}`;
 
   const keyboard = new InlineKeyboard()
-    .text("✅ 确认", `confirm:${feedback.id}`)
-    .text("❌ 拒绝", `reject:${feedback.id}`);
+    .text("Confirm Fix", `confirm:${feedback.id}`)
+    .text("Reject", `reject:${feedback.id}`);
 
   await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, message, { reply_markup: keyboard });
 }
@@ -253,28 +243,27 @@ export async function sendFixedNotification(
   feedback: FeedbackRow,
   projectName: string
 ): Promise<void> {
+  if (!env.TELEGRAM_ADMIN_CHAT_ID) return;
+
   const bot = new Bot(env.BOT_TOKEN);
 
-  // Notify admin
   const adminMessage =
-    `✅ Bug 已修复 #${feedback.id}\n\n` +
-    `项目: ${projectName}\n` +
+    `Bug #${feedback.id} Fixed!\n\n` +
+    `Project: ${projectName}\n` +
     `PR: ${feedback.pr_url}`;
 
   await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, adminMessage);
 
-  // Notify reporter if reporter_id exists
   if (feedback.reporter_id) {
     try {
       const reporterMessage =
-        `✅ 你报告的 Bug #${feedback.id} 已修复!\n\n` +
-        `项目: ${projectName}\n` +
-        `描述: ${feedback.description}\n` +
+        `Your bug #${feedback.id} has been fixed!\n\n` +
+        `Project: ${projectName}\n` +
+        `Description: ${feedback.description}\n` +
         `PR: ${feedback.pr_url}`;
 
       await bot.api.sendMessage(feedback.reporter_id, reporterMessage);
     } catch (error) {
-      // Ignore if can't send to reporter (e.g., user blocked bot)
       console.error("Failed to notify reporter:", error);
     }
   }

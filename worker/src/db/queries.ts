@@ -1,5 +1,9 @@
 import type { ProjectRow, FeedbackRow, FeedbackStatus } from "../types";
 
+export const VALID_STATUSES: readonly FeedbackStatus[] = [
+  "pending", "diagnosing", "diagnosed", "confirmed", "fixing", "fixed", "rejected", "needs_review",
+] as const;
+
 interface InsertProjectInput {
   id: string;
   name: string;
@@ -166,5 +170,39 @@ export async function setGoogleSheetCursor(
   await db
     .prepare("UPDATE google_sheet_cursor SET last_row = ?1 WHERE id = 1")
     .bind(lastRow)
+    .run();
+}
+
+export async function getTelegramSession(
+  db: D1Database,
+  userId: number
+): Promise<string | null> {
+  const row = await db
+    .prepare("SELECT project_id FROM telegram_sessions WHERE user_id = ?1")
+    .bind(userId)
+    .first<{ project_id: string }>();
+  return row?.project_id ?? null;
+}
+
+export async function setTelegramSession(
+  db: D1Database,
+  userId: number,
+  projectId: string
+): Promise<void> {
+  await db
+    .prepare(
+      "INSERT OR REPLACE INTO telegram_sessions (user_id, project_id) VALUES (?1, ?2)"
+    )
+    .bind(userId, projectId)
+    .run();
+}
+
+export async function deleteTelegramSession(
+  db: D1Database,
+  userId: number
+): Promise<void> {
+  await db
+    .prepare("DELETE FROM telegram_sessions WHERE user_id = ?1")
+    .bind(userId)
     .run();
 }

@@ -6,6 +6,7 @@ import {
   updateFeedbackDiagnosis,
   updateFeedbackStatus,
   listProjects,
+  VALID_STATUSES,
 } from "../db/queries";
 import {
   sendDiagnosisNotification,
@@ -108,6 +109,10 @@ feedback.patch("/feedback/:id/status", async (c) => {
 
   if (!body.status) {
     return c.json({ error: "Missing required field: status" }, 400);
+  }
+
+  if (!VALID_STATUSES.includes(body.status)) {
+    return c.json({ error: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}` }, 400);
   }
 
   try {

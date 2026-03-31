@@ -36,6 +36,12 @@ CREATE TABLE IF NOT EXISTS google_sheet_cursor (
 );
 
 INSERT OR IGNORE INTO google_sheet_cursor (id, last_row) VALUES (1, 1);
+
+CREATE TABLE IF NOT EXISTS telegram_sessions (
+    user_id INTEGER PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
 `;
 
 export async function migrateDb(): Promise<D1Database> {
