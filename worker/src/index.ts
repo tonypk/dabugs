@@ -32,6 +32,18 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<void> {
-    // Placeholder for Google Sheet polling (Task 5)
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const { pollGoogleSheet } = await import("./services/google-sheet");
+          const imported = await pollGoogleSheet(env);
+          if (imported > 0) {
+            console.log(`Imported ${imported} feedbacks from Google Sheet`);
+          }
+        } catch (err) {
+          console.error("Google Sheet poll failed:", err);
+        }
+      })()
+    );
   },
 };
