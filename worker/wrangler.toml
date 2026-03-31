@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "dabugs-db"
-database_id = "placeholder-replace-after-d1-create"
+database_id = "565644bc-7db7-4d9f-9de3-1dd4b4fcc06f"
 
 [triggers]
 crons = ["*/5 * * * *"]
